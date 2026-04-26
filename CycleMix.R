@@ -32,9 +32,9 @@ run_CycleMix_knnSmooth <- function(seur_obj, gene_table, cluster_col=NULL) {
 	elapsed.time1 <- system.time(out <- classifyCells(SCE, gene_table))[3]
 
 	if (is.null(cluster_col)) {
-		elapsed.time2 <- system.time(out <- knnSmooth(out, dims=seur_obj@reductions$pca, k=20))[3]
+		elapsed.time2 <- system.time(out <- knnSmooth(out, dims=seur_obj@reductions$pca@cell.embeddings, k=20))[3]
 	} else {
-		elapsed.time2 <- system.time(out <- knnSmooth(out, dims=seur_obj@reductions$pca, k=20, clusters=seur_obj@meta.data[,cluster_col]))[3]
+		elapsed.time2 <- system.time(out <- knnSmooth(out, dims=seur_obj@reductions$pca@cell.embeddings, k=20, clusters=seur_obj@meta.data[,cluster_col]))[3]
 	}
 	#end.time <- Sys.time()
 	#elapsed.time=end.time - start.time
