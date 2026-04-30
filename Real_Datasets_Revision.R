@@ -13,6 +13,71 @@ set.seed(3891)
 output <- c();
 time <- c();
 
+source("~/projects/def-tandrew6/tandrew6/External_Data/Ensembl/Ensembl_Stuff.R")
+remap_genesets <- function(GeneSet, to.spp = c("hsap", "mmus")){
+	species <- "";
+	if(sum(GeneSet$Gene %in% ensg_name_map$hgnc_symbol)/nrow(GeneSet) > 0.5) {
+		species <- "human"
+	} else if (sum(GeneSet$Gene %in% musg_name_map$mgi_symbol)/nrow(GeneSet) > 0.5) {
+		species <- "mouse"
+	} else {
+		stop("Unrecognized species.")
+	}
+	GeneSet$Orig.Gene <- GeneSet$Gene
+	if (species == "human" & to.spp == "mmus") {
+		GeneSet$Gene <- General_Map(GeneSet$Orig.Gene, in.name="symbol", out.name="symbol", in.org="Hsap", out.org="Mmus")
+	}
+	if (species == "mouse" & to.spp == "hsap") {
+		GeneSet$Gene <- General_Map(GeneSet$Orig.Gene, in.name="symbol", out.name="symbol", out.org="Hsap", in.org="Mmus")
+
+	}
+	GeneSet <- GeneSet[GeneSet$Gene != "",]
+	GeneSet <- GeneSet[!is.na(GeneSet$Gene),]
+	return(GeneSet)
+}
+
+run_phase_classifications_all_gene_sets <- function(seur_obj, species=c("hsap", "mmus")) {
+	all_out <- list()
+	all_genesets <- list("Whit"=remap_genesets(HGeneSets$Whitfield, to.spp=species), 
+				"Tirosh"=remap_genesets(HGeneSets$Tirosh, to.spp=species),
+				"Macosko"=remap_genesets(HGeneSets$Macosko, to.spp=species),
+				"Seurat"=remap_genesets(HGeneSets$Seurat, to.spp=species),
+				"Cyclone"=remap_genesets(MGeneSets$Cyclone, to.spp=species)
+			)
+	seur_obj <- NormalizeData(seur_obj)
+	for( set in names(all_genesets)) {
+		cyclemix <- run_CycleMix(GetAssayData(seur_obj, layer="counts"), all_genesets[[set]])$phase
+		all_out[[set]] <- cyclemix
+	}
+	return(all_out)
+}
+
+### This is not necessary b/c the Tirosh table in CycleMix is the same as the Seurat geneset.
+run_phase_classifications_identical <- function(seur_obj, species=c("hsap", "mmus")) {
+	seur_obj <- NormalizeData(seur_obj)
+	if (species == "hsap") {
+		s.genes <- cc.genes$s.genes
+		g2m.genes <- cc.genes$g2m.genes
+		gene_table <- HGeneSets$Seurat
+	} else if (species == "mmus") {
+		gene_table <- MGeneSets$Cyclone
+		s.genes <- gene_table[(gene_table[,2] == "S" | gene_table[,2] == "G1S") & gene_table[,3] == 1,1]
+		g2m.genes <- gene_table[(gene_table[,2] == "G2M" | gene_table[,2] == "M" | gene_table[,2] == "G2") & gene_table[,3] == 1,1]
+	}
+	cyclemix <- run_CycleMix(GetAssayData(seur_obj, layer="counts"), gene_table)
+	seur.elapsed.time <- system.time(seur_obj <- CellCycleScoring(seur_obj, s.features=s.genes, g2m.features=g2m.genes))[3]
+	seurat <- list(phase=seur_obj@meta.data$Phase, time=seur.elapsed.time)
+	if (ncol(seur_obj ) < 80000) {
+	cyclone.elapsed.time <- system.time(cyclone <- run_cyclone(GetAssayData(seur_obj, layer="counts"), species=species))
+	} else {
+	cyclone.elapsed.time <- rep(NA, length(seur.elapsed.time))
+	cyclone <- NA
+	}
+	return(list(metadata=seur_obj@meta.data, 
+		cyclemix=cyclemix, seurat=seurat, cyclone=cyclone, 
+		time=rbind(cyclemix$time, seur.elapsed.time, cyclone.elapsed.time)))
+}
+
 run_phase_classifications <- function(seur_obj, species=c("hsap", "mmus")) {
 	seur_obj <- NormalizeData(seur_obj)
 	if (species == "hsap") {
@@ -49,8 +114,16 @@ run_phase_classification_sctransform <- function(seur_obj, species=c("hsap", "mm
 		g2m.genes <- gene_table[(gene_table[,2] == "G2M" | gene_table[,2] == "M" | gene_table[,2] == "G2") & gene_table[,3] == 1,1]
 	}
 	
-	seur_obj <- SCTransform(seur_obj, residual.features=c(s.genes, g2m.genes))
-	cyclemix <- run_CycleMix(GetAssayData(seur_obj, assay="SCT", layer="scale.data"), gene_table)
+	tmp <- c(s.genes, g2m.genes)
+	tmp <- tmp[tmp %in% rownames(seur_obj)]
+	seur_obj <- SCTransform(seur_obj, residual.features=tmp)
+#	seur_obj <- SCTransform(seur_obj)
+#	cyclemix <- run_CycleMix(GetAssayData(seur_obj, assay="SCT", slot="scale.data"), gene_table)
+	# Run CycleMix
+	mat <- GetAssayData(seur_obj, assay="SCT", slot="scale.data")
+	elapsed.time <- system.time(out <- classifyCells(mat, gene_table))[3]
+        cyclemix <- list(phase=out$phase)
+
 	seur_obj <- CellCycleScoring(seur_obj, s.features=s.genes, g2m.features=g2m.genes)
 	seurat <- list(phase=seur_obj@meta.data$Phase)
 	return(list(metadata=seur_obj@meta.data, 
@@ -58,6 +131,7 @@ run_phase_classification_sctransform <- function(seur_obj, species=c("hsap", "mm
 		))
 
 }
+
 run_phase_classification_cyclemixsmooth <- function(seur_obj, species=c("hsap","mmus"), type_col) {
 	DefaultAssay(seur_obj) <- "RNA"
 	seur_obj <- NormalizeData(seur_obj)
@@ -132,7 +206,10 @@ obj <- CreateSeuratObject(counts=counts, meta.data=obj@meta.data)
 phases_sct <- run_phase_classification_sctransform(obj, species="hsap")
 phases_smoothed <- run_phase_classification_cyclemixsmooth(obj, species="hsap", type_col=Wang_column)
 
-saveRDS(list(sct=phases_sct, smoothed=phases_smoothed), "Wang_colon_advphases.rds")
+saveRDS(list(sct=phases_sct, smoothed=phases_smoothed), "Wang_colon_advphases_allSeurGenes.rds")
+
+phases_genesets <- run_phase_classifications_all_gene_sets(obj, species="hsap")
+saveRDS(phases_genesets, "Wang_colon_cyclemix_allgenesets.rds")
 
 
 Wang_Colon_Phases<- readRDS("Wang_colon_phases.rds")
@@ -182,7 +259,11 @@ obj <- CreateSeuratObject(counts=counts, meta.data=obj@meta.data)
 phases_sct <- run_phase_classification_sctransform(obj, species="hsap")
 phases_smoothed <- run_phase_classification_cyclemixsmooth(obj, species="hsap", type_col=Wang_column)
 
-saveRDS(list(sct=phases_sct, smoothed=phases_smoothed), "Wang_ileum_advphases.rds")
+#saveRDS(list(sct=phases_sct, smoothed=phases_smoothed), "Wang_ileum_advphases.rds")
+saveRDS(list(sct=phases_sct, smoothed=phases_smoothed), "Wang_ileum_advphases_allSeurGenes.rds")
+
+phases_genesets <- run_phase_classifications_all_gene_sets(obj, species="hsap")
+saveRDS(phases_genesets, "Wang_ileum_cyclemix_allgenesets.rds")
 
 
 Wang_Ileum_Phases <- readRDS(file="Wang_ileum_phases.rds")
@@ -217,27 +298,35 @@ saveRDS(list(seur_g2m_purity20=seur_g2m_purity20,seur_S_purity20=seur_S_purity20
 
 if (args[1]==3) {
 print("Moreno") ### FAILED ###
+
+set.seed(3671)
 Moreno_column <- "celltype_original"
 # Moreno_glioblastoma
-obj <- readRDS("Moreno_core_gliobastoma.rds") 
-obj@meta.data$UMAP1 <- obj@reductions$umap@cell.embeddings[,1]
-obj@meta.data$UMAP2 <- obj@reductions$umap@cell.embeddings[,2]
-counts <- GetAssayData(obj, layer="counts")
-sym <- General_Map(rownames(counts), in.org="Hsap", out.org="Hsap", in.name="ensg", out.name="symbol")
-keep <- !duplicated(sym) & sym != ""
-counts <- counts[keep,]; rownames(counts) <- sym[keep]
-set.seed(998)
-counts <- counts[,sample(1:ncol(counts), size=70000)]
-obj <- CreateSeuratObject(counts=counts, meta.data=obj@meta.data[match(colnames(counts),rownames(obj@meta.data)),])
-#Moreno_Glio_Phases <- run_phase_classifications(obj, species="hsap")
-#saveRDS(Moreno_Glio_Phases, file="Moreno_glioblastoma_phases_SUBSAMPLE.rds")
+#obj <- readRDS("Moreno_core_gliobastoma.rds") 
+obj <- readRDS("Moreno_SUBSAMPLE_OBJ.rds")
+#obj@meta.data$UMAP1 <- obj@reductions$umap@cell.embeddings[,1]
+#obj@meta.data$UMAP2 <- obj@reductions$umap@cell.embeddings[,2]
+#counts <- GetAssayData(obj, slot="counts")
+#sym <- General_Map(rownames(counts), in.org="Hsap", out.org="Hsap", in.name="ensg", out.name="symbol")
+#keep <- !duplicated(sym) & sym != ""
+#counts <- counts[keep,]; rownames(counts) <- sym[keep]
+#set.seed(998)
+#counts <- counts[,sample(1:ncol(counts), size=70000)]
+#obj <- CreateSeuratObject(counts=counts, meta.data=obj@meta.data[match(colnames(counts),rownames(obj@meta.data)),])
+##Moreno_Glio_Phases <- run_phase_classifications(obj, species="hsap")
+##saveRDS(Moreno_Glio_Phases, file="Moreno_glioblastoma_phases_SUBSAMPLE.rds")
 
 # Revision CycleMix Variations
 # scTransform
-phases_sct <- run_phase_classification_sctransform(obj, species="hsap")
+#phases_sct <- run_phase_classification_sctransform(obj, species="hsap")# FAILS ???
 phases_smoothed <- run_phase_classification_cyclemixsmooth(obj, species="hsap", type_col=Moreno_column)
 
-saveRDS(list(sct=phases_sct, smoothed=phases_smoothed), "Moreno_SUBSAMPLE_advphases.rds")
+#saveRDS(list(sct=phases_sct, smoothed=phases_smoothed), "Moreno_SUBSAMPLE_advphases.rds")
+saveRDS(list(sct=NULL, smoothed=phases_smoothed), "Moreno_SUBSAMPLE_advphases.rds")
+#saveRDS(obj, "Moreno_SUBSAMPLE_OBJ.rds")
+
+phases_genesets <- run_phase_classifications_all_gene_sets(obj, species="hsap")
+saveRDS(phases_genesets, "Moreno_SUBSAMPLE_cyclemix_allgenesets.rds")
 
 Moreno_Glio_Phases <- readRDS("Moreno_glioblastoma_phases_SUBSAMPLE.rds")
 
@@ -300,7 +389,11 @@ obj <- CreateSeuratObject(counts=counts, meta.data=obj@meta.data)
 phases_sct <- run_phase_classification_sctransform(obj, species="mmus")
 phases_smoothed <- run_phase_classification_cyclemixsmooth(obj, species="mmus", type_col=Gu_column)
 
-saveRDS(list(sct=phases_sct, smoothed=phases_smoothed), "Gu_lymph_advphases.rds")
+#saveRDS(list(sct=phases_sct, smoothed=phases_smoothed), "Gu_lymph_advphases.rds")
+saveRDS(list(sct=phases_sct, smoothed=phases_smoothed), "Gu_lymph_advphases_allSeurGenes.rds")
+
+phases_genesets <- run_phase_classifications_all_gene_sets(obj, species="mmus")
+saveRDS(phases_genesets, "Gu_lymph_cyclemix_allgenesets.rds")
 
 Gu_Lymph_Phases <- readRDS("Gu_lymph_phases.rds")
 
@@ -351,7 +444,11 @@ obj <- CreateSeuratObject(counts=counts, meta.data=obj@meta.data)
 phases_sct <- run_phase_classification_sctransform(obj, species="hsap")
 phases_smoothed <- run_phase_classification_cyclemixsmooth(obj, species="hsap", type_col=Triana_column)
 
-saveRDS(list(sct=phases_sct, smoothed=phases_smoothed), "Triana_bonemarrow_advphases.rds")
+#saveRDS(list(sct=phases_sct, smoothed=phases_smoothed), "Triana_bonemarrow_advphases.rds")
+saveRDS(list(sct=phases_sct, smoothed=phases_smoothed), "Triana_bonemarrow_advphases_allSeurGenes.rds")
+
+phases_genesets <- run_phase_classifications_all_gene_sets(obj, species="hsap")
+saveRDS(phases_genesets, "Triana_bonemarrow_cyclemix_allgenesets.rds")
 
 Triana_Bone_Phases=readRDS("Triana_bonemarrow_phases.rds")
 
@@ -401,7 +498,11 @@ obj <- CreateSeuratObject(counts=counts, meta.data=obj@meta.data)
 phases_sct <- run_phase_classification_sctransform(obj, species="hsap")
 phases_smoothed <- run_phase_classification_cyclemixsmooth(obj, species="hsap", type_col=Street_column)
 
-saveRDS(list(sct=phases_sct, smoothed=phases_smoothed), "Streets_adipose_advphases.rds")
+#saveRDS(list(sct=phases_sct, smoothed=phases_smoothed), "Streets_adipose_advphases.rds")
+saveRDS(list(sct=phases_sct, smoothed=phases_smoothed), "Streets_adipose_advphases_allSeurGenes.rds")
+
+phases_genesets <- run_phase_classifications_all_gene_sets(obj, species="hsap")
+saveRDS(phases_genesets, "Streets_adipose_cyclemix_allgenesets.rds")
 
 Streets_adipose_Phases = readRDS("Streets_adipose_phases.rds")
 ## Neighbourhood Purity ##
@@ -568,6 +669,8 @@ p <- ggplot(df, aes(x = new, y = prolif_prop, color = type)) +
 png("Real_Datasets_prolif_vs_not.png", width=8*0.65, height=6*0.65, units="in", res=300)
 print(p)
 dev.off()
+
+## Repeat the above for the sctransform & smoothed results ##
 
 ## Plot - Simpson Index
 

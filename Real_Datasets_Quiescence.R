@@ -505,16 +505,20 @@ consensus_dn_genes <- names(reps[reps >= 4])
 reps <- table(all_genes_up)
 consensus_up_genes <- names(reps[reps >= 4])
 
-paths <- readRDS("~/projects/def-tandrew6/tandrew6/Human_Pathways.rds")
+#paths <- readRDS("~/projects/def-tandrew6/tandrew6/Human_Pathways.rds")
+paths <- MultiPath::get_pathways(species="human", include.celltype=FALSE)
+paths <- convert_GSEAObj_to_list(paths)
 rich <- MultiPath::do_ora(consensus_dn_genes, pathways=paths, background = rownames(counts))
 rich2 <- MultiPath::condense_terms(rich)
 
 tab <- rich2$results[order(rich2$result$FDR),]
+require(RColorBrewer)
+colours <- 
 
 png("G0_genes_pathways.png", width=6, height=4, units="in", res=300)
 par(mar=c(4,12,1,1))
 #barplot(-log10(tab$FDR)[1:9], col="navy", names=rownames(tab)[1:9], horiz=TRUE, xlab="-log(FDR)", las=1)
-barplot(-log10(tab$FDR)[1:9], col="navy", names=c("MYC targets", "E2F targets", "Cell Cycle", "Chromosome organization", "Infectious Disease", "DNA Replication", "DNA Geometric Change", "NucEnvelope Reassembly", "mTOR signaling"), horiz=TRUE, xlab="-log(FDR)", las=1)
+barplot(tab$log2fe, col="navy", names=c("MYC targets", "E2F targets", "Cell Cycle", "Chromosome organization", "Infectious Disease", "DNA Replication", "DNA Geometric Change", "NucEnvelope Reassembly", "mTOR signaling"), horiz=TRUE, xlab="-log(FDR)", las=1)
 dev.off()
 
 tab <- rich$results[order(rich$result$FDR),]

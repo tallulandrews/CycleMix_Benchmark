@@ -38,7 +38,7 @@ run_CycleMix_knnSmooth <- function(seur_obj, gene_table, cluster_col=NULL) {
 	}
 	#end.time <- Sys.time()
 	#elapsed.time=end.time - start.time
-	print(paste("Elapsed time:", elapsed.time))
+	print(paste("Elapsed time:", elapsed.time1+elapsed.time2))
 	return(list(phase=out$phase, time=elapsed.time1+elapsed.time2))
 }
 

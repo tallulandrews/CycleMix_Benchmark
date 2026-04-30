@@ -1,4 +1,4 @@
-files <- Sys.glob("/home/tandrew6/scratch/CycleMix_Manuscript/E-MTAB-2805/*_counts.txt")
+files <- Sys.glob("/home/tandrew6/scratch/CycleMix_Benchmark/RawData/ButtnerData/*_counts.txt")
 
 source("~/scripts/My_R_Scripts.R")
 
