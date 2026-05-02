@@ -37,154 +37,7 @@ remap_genesets <- function(GeneSet, to.spp = c("hsap", "mmus")){
 	return(GeneSet)
 }
 
-run_phase_classifications_all_gene_sets <- function(seur_obj, species=c("hsap", "mmus")) {
-	all_out <- list()
-	all_genesets <- list("Whit"=remap_genesets(HGeneSets$Whitfield, to.spp=species), 
-				"Tirosh"=remap_genesets(HGeneSets$Tirosh, to.spp=species),
-				"Macosko"=remap_genesets(HGeneSets$Macosko, to.spp=species),
-				"Seurat"=remap_genesets(HGeneSets$Seurat, to.spp=species),
-				"Cyclone"=remap_genesets(MGeneSets$Cyclone, to.spp=species)
-			)
-	seur_obj <- NormalizeData(seur_obj)
-	for( set in names(all_genesets)) {
-		cyclemix <- run_CycleMix(GetAssayData(seur_obj, slot="counts"), all_genesets[[set]])$phase
-		all_out[[set]] <- cyclemix
-	}
-	return(all_out)
-}
-
-### This is not necessary b/c the Tirosh table in CycleMix is the same as the Seurat geneset.
-run_phase_classifications_identical <- function(seur_obj, species=c("hsap", "mmus")) {
-	seur_obj <- NormalizeData(seur_obj)
-	if (species == "hsap") {
-		s.genes <- cc.genes$s.genes
-		g2m.genes <- cc.genes$g2m.genes
-		gene_table <- HGeneSets$Seurat
-	} else if (species == "mmus") {
-		gene_table <- MGeneSets$Cyclone
-		s.genes <- gene_table[(gene_table[,2] == "S" | gene_table[,2] == "G1S") & gene_table[,3] == 1,1]
-		g2m.genes <- gene_table[(gene_table[,2] == "G2M" | gene_table[,2] == "M" | gene_table[,2] == "G2") & gene_table[,3] == 1,1]
-	}
-	cyclemix <- run_CycleMix(GetAssayData(seur_obj, slot="counts"), gene_table)
-	seur.elapsed.time <- system.time(seur_obj <- CellCycleScoring(seur_obj, s.features=s.genes, g2m.features=g2m.genes))[3]
-	seurat <- list(phase=seur_obj@meta.data$Phase, time=seur.elapsed.time)
-	if (ncol(seur_obj ) < 80000) {
-	cyclone.elapsed.time <- system.time(cyclone <- run_cyclone(GetAssayData(seur_obj, slot="counts"), species=species))
-	} else {
-	cyclone.elapsed.time <- rep(NA, length(seur.elapsed.time))
-	cyclone <- NA
-	}
-	return(list(metadata=seur_obj@meta.data, 
-		cyclemix=cyclemix, seurat=seurat, cyclone=cyclone, 
-		time=rbind(cyclemix$time, seur.elapsed.time, cyclone.elapsed.time)))
-}
-
-run_phase_classifications <- function(seur_obj, species=c("hsap", "mmus")) {
-	seur_obj <- NormalizeData(seur_obj)
-	if (species == "hsap") {
-		s.genes <- cc.genes$s.genes
-		g2m.genes <- cc.genes$g2m.genes
-		gene_table <- HGeneSets$Tirosh
-	} else if (species == "mmus") {
-		gene_table <- MGeneSets$Cyclone
-		s.genes <- gene_table[(gene_table[,2] == "S" | gene_table[,2] == "G1S") & gene_table[,3] == 1,1]
-		g2m.genes <- gene_table[(gene_table[,2] == "G2M" | gene_table[,2] == "M" | gene_table[,2] == "G2") & gene_table[,3] == 1,1]
-	}
-	cyclemix <- run_CycleMix(GetAssayData(seur_obj, slot="counts"), gene_table)
-	seur.elapsed.time <- system.time(seur_obj <- CellCycleScoring(seur_obj, s.features=s.genes, g2m.features=g2m.genes))[3]
-	seurat <- list(phase=seur_obj@meta.data$Phase, time=seur.elapsed.time)
-	if (ncol(seur_obj ) < 80000) {
-	cyclone.elapsed.time <- system.time(cyclone <- run_cyclone(GetAssayData(seur_obj, slot="counts"), species=species))
-	} else {
-	cyclone.elapsed.time <- rep(NA, length(seur.elapsed.time))
-	cyclone <- NA
-	}
-	return(list(metadata=seur_obj@meta.data, 
-		cyclemix=cyclemix, seurat=seurat, cyclone=cyclone, 
-		time=rbind(cyclemix$time, seur.elapsed.time, cyclone.elapsed.time)))
-}
-
-run_phase_classification_sctransform <- function(seur_obj, species=c("hsap", "mmus")) {
-	if (species == "hsap") {
-		s.genes <- cc.genes$s.genes
-		g2m.genes <- cc.genes$g2m.genes
-		gene_table <- HGeneSets$Tirosh
-	} else if (species == "mmus") {
-		gene_table <- MGeneSets$Cyclone
-		s.genes <- gene_table[(gene_table[,2] == "S" | gene_table[,2] == "G1S") & gene_table[,3] == 1,1]
-		g2m.genes <- gene_table[(gene_table[,2] == "G2M" | gene_table[,2] == "M" | gene_table[,2] == "G2") & gene_table[,3] == 1,1]
-	}
-	
-	tmp <- c(s.genes, g2m.genes)
-	tmp <- tmp[tmp %in% rownames(seur_obj)]
-	seur_obj <- SCTransform(seur_obj, residual.features=tmp)
-#	seur_obj <- SCTransform(seur_obj)
-#	cyclemix <- run_CycleMix(GetAssayData(seur_obj, assay="SCT", slot="scale.data"), gene_table)
-	# Run CycleMix
-	mat <- GetAssayData(seur_obj, assay="SCT", slot="scale.data")
-	elapsed.time <- system.time(out <- classifyCells(mat, gene_table))[3]
-        cyclemix <- list(phase=out$phase)
-
-	seur_obj <- CellCycleScoring(seur_obj, s.features=s.genes, g2m.features=g2m.genes)
-	seurat <- list(phase=seur_obj@meta.data$Phase)
-	return(list(metadata=seur_obj@meta.data, 
-		cyclemix=cyclemix, seurat=seurat 
-		))
-
-}
-
-run_phase_classification_cyclemixsmooth <- function(seur_obj, species=c("hsap","mmus"), type_col) {
-	DefaultAssay(seur_obj) <- "RNA"
-	seur_obj <- NormalizeData(seur_obj)
-	seur_obj <- FindVariableFeatures(seur_obj)
-	seur_obj <- ScaleData(seur_obj)
-	seur_obj <- RunPCA(seur_obj, npcs=20)
-	if (species == "hsap") {
-		s.genes <- cc.genes$s.genes
-		g2m.genes <- cc.genes$g2m.genes
-		gene_table <- HGeneSets$Tirosh
-	} else if (species == "mmus") {
-		gene_table <- MGeneSets$Cyclone
-		s.genes <- gene_table[(gene_table[,2] == "S" | gene_table[,2] == "G1S") & gene_table[,3] == 1,1]
-		g2m.genes <- gene_table[(gene_table[,2] == "G2M" | gene_table[,2] == "M" | gene_table[,2] == "G2") & gene_table[,3] == 1,1]
-	}
-	cyclemix_knn <- run_CycleMix_knnSmooth(seur_obj, gene_table)
-	cyclemix_cluster <- run_CycleMix_knnSmooth(seur_obj, gene_table, cluster_col=type_col)
-	return(list(knn=cyclemix_knn, cluster=cyclemix_cluster))
-}
-
-# Calculates the proportion of neighbours of each cell in group1 that are in group2 based on the graph
-calc_purity20 <- function(is.group1, is.group2, graph) {
-	out <- c()
-	for (cell in is.group1) {
-		nns <- which(graph[cell,]>0)
-		score <- sum(nns %in% seur_g2m)/length(nns)
-		out <- c(out, score)
-	}
-	return(out)
-}
-
-calc_purity20_trio <- function(Phases, nn_graph){
-	seur_g2m <- which(Phases$seurat$phase == "G2M")
-	seur_S <- which(Phases$seurat$phase == "S")
-	seur_g2m_purity20 <- calc_purity20(seur_g2m, seur_g2m, nn_graph)
-	seur_S_purity20 <- calc_purity20(seur_S, seur_S, nn_graph)
-
-	cyc_g2m <- which(Phases$cyclemix$phase == "G2M")
-	cyc_S <- which(Phases$cyclemix$phase == "G1S")
-	cyc_g2m_purity20 <- calc_purity20(cyc_g2m, cyc_g2m, nn_graph)
-	cyc_S_purity20 <- calc_purity20(cyc_S, cyc_S, nn_graph)
-
-	lone_g2m <- which(Phases$cyclone$phase == "G2M")
-	lone_S <- which(Phases$cyclone$phase == "S")
-	lone_g2m_purity20 <- calc_purity20(lone_g2m, lone_g2m, nn_graph)
-	lone_S_purity20 <- calc_purity20(lone_S, lone_S, nn_graph)
-
-	return(list(seur_g2m_purity20=seur_g2m_purity20,seur_S_purity20=seur_S_purity20, cyc_g2m_purity20=cyc_g2m_purity20, cyc_S_purity20=cyc_S_purity20, lone_g2m_purity20=lone_g2m_purity20, lone_S_purity20=lone_S_purity20))
-
-}
-
-goodness_of_fit <- function(seur_obj, species=c("hsap","mmus"), plot_prefix) {
+downsample_fit <- function(seur_obj, species=c("hsap","mmus"), plot_prefix, downprop=0.5) {
         if (species == "hsap") {
                 s.genes <- cc.genes$s.genes
                 g2m.genes <- cc.genes$g2m.genes
@@ -196,21 +49,23 @@ goodness_of_fit <- function(seur_obj, species=c("hsap","mmus"), plot_prefix) {
         }
 	counts <- GetAssayData(seur_obj, slot="counts")
 	SCE <- SingleCellExperiment(assays=list(counts=counts), rowData=data.frame(feature_symbol=rownames(counts)))
+	require("scuttle")
+	downsampled <- downsampleMatrix(counts, prop=downprop)
+	SCE <- SingleCellExperiment(assays=list(counts=downsampled), rowData=data.frame(feature_symbol=rownames(counts)))
         logcounts(SCE) <- normalizeCounts(SCE, log=TRUE, pseudo_count=1, size.factors=colSums(counts)/median(colSums(counts)))
         print("Cyclemix is classifying cells")
         my_output = classifyCells(SCE, gene_table)
-	print(my_output)
-	for (phase in names(my_output$fits)) {
-		pdf(paste0(plot_prefix,"_",phase,"_mixturePlot.pdf"), width=4*1.5,height=3*1.5)
-		plotMixture(my_output$fits[[phase]], BIC=TRUE)
-		dev.off()
-	}
+	#print(my_output)
+#	for (phase in names(my_output$fits)) {
+#		pdf(paste0(plot_prefix,"_",phase,"_", downprop,"_mixturePlot.pdf"), width=4*1.5,height=3*1.5)
+#		plotMixture(my_output$fits[[phase]], BIC=TRUE)
+#		dev.off()
+#	}
+	ks_check_fit <- checkFit(my_output, nbootstrap=100, summarize=TRUE)
+	saveRDS(list("cyclemix"=my_output,"checkfit"= ks_check_fit), paste0(plot_prefix,"_", downprop,"_CycleMix_fits.rds"))
 #	pdf(paste0(plot_prefix,"_G1S_mixturePlot.pdf"), width=4*1.5,height=3*1.5)
 #	plotMixture(my_output$fits$G1S, BIC=TRUE)
 #	dev.off()
-
-	ks_check_fit <- checkFit(my_output, nbootstrap=100, summarize=TRUE)
-	return(ks_check_fit)
 }
 
 args <- commandArgs(trailingOnly=TRUE) # 1 = dataset (1-6), 2 = make plots (TRUE/FALSE)
@@ -232,6 +87,10 @@ sum(GetAssayData(obj, slot="counts") == 0)/prod(dim(obj))
 #Wang_Colon_Phases <- run_phase_classifications(obj, species="hsap")
 #saveRDS(Wang_Colon_Phases, file="Wang_colon_phases.rds")
 
+for(prop in seq(from=0.05, to=0.95, by=0.05)) {
+	downsample_fit(obj, species="hsap", plot_prefix="Wang_colon", downprop=prop)
+}
+
 # Revision CycleMix Variations
 # scTransform
 #phases_sct <- run_phase_classification_sctransform(obj, species="hsap")
@@ -242,8 +101,6 @@ sum(GetAssayData(obj, slot="counts") == 0)/prod(dim(obj))
 #phases_genesets <- run_phase_classifications_all_gene_sets(obj, species="hsap")
 #saveRDS(phases_genesets, "Wang_colon_cyclemix_allgenesets.rds")
 
-good.fit <- goodness_of_fit(obj, plot_prefix="Wang_colon", species="hsap")
-saveRDS(good.fit, "Wang_colon_goodnessoffit.rds")
 
 
 #Wang_Colon_Phases<- readRDS("Wang_colon_phases.rds")

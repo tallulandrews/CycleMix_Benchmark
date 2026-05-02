@@ -334,7 +334,81 @@ pheatmap(to_plot[reorder_rows,reorder_columns], cluster_rows=FALSE, cluster_cols
 dev.off()
 	
 
-# Plot 
+# Plot - Downsampling
+Wang_column <- "cell_type"
+# Wang Colon
+require(Seurat)
+obj <- readRDS("Wang_colon.rds")
+obj@meta.data$UMAP1 <- obj@reductions$umap@cell.embeddings[,1]
+obj@meta.data$UMAP2 <- obj@reductions$umap@cell.embeddings[,2]
+DefaultAssay(obj) <- "RNA"
+obj <- NormalizeData(obj)
+obj <- FindVariableFeatures(obj)
+obj <- ScaleData(obj)
+obj <- RunPCA(obj, npcs=20)
+Wang_is_prolif <- c("transit amplifying cell of colon")
+Wang_not_prolif <- c("colon goblet cell", "paneth cell of colon")
+
+Wang_get_stats <- function(obj, phases) {
+	type_col <- "cell_type"
+	Wang_is_prolif <- c("transit amplifying cell of colon")
+	Wang_not_prolif <- c("colon goblet cell", "paneth cell of colon")
+
+        cells <- obj@meta.data[,type_col] %in% Wang_is_prolif;
+        if (length(phases) != length(cells)) {stop("Cyclemix length no match metadata.")}
+
+        prolif_freq <- table(factor(phases[cells], levels=c("G1S", "G2M", "None")))/sum(cells)
+        names(prolif_freq) <- c("S", "G2M", "None");
+        prolif_freq <- prolif_freq[c("None", "S", "G2M")]
+
+        cells <- obj@meta.data[,type_col] %in% Wang_not_prolif;
+        if (length(phases) != length(cells)) {stop("Cyclemix length no match metadata.")}
+
+        not_freq <- table(factor(phases[cells], levels=c("G1S", "G2M", "None")))/sum(cells)
+        names(not_freq) <- c("S", "G2M", "None");
+        not_freq <- not_freq[c("None", "S", "G2M")]
+
+        tab <- rbind(prolif_freq, not_freq)
+        rownames(tab) <- c("Prolif", "Quiesc")
+        return(tab[,2]+tab[,3])
+}
+
+downsample_files <- Sys.glob("Wang_colon*fits.rds")
+out <- c()
+# Plot prolif & quiec vs downsample
+for (prop in seq(to=0.95, from=0.05, by=0.05)) {
+	f <- readRDS(paste0("Wang_colon_", prop, "_CycleMix_fits.rds"))
+	stuff <- c(prop, Wang_get_stats(obj, f$cyclemix$phase))
+	out <- rbind(out,stuff)
+}
+
+
+set.seed(3892)
+classification <- readRDS("Wang_colon_0.05_CycleMix_fits.rds")$cyclemix
+smooth_out <- c()
+for (threshold in c(0.5,rev(seq(to=0.25, from=0.05, by=0.05)))) {
+	smoothed <- knnSmooth(classification, dim=obj@reductions$pca@cell.embeddings, k=20, min.threshold=threshold)
+	stuff <- c(threshold, Wang_get_stats(obj, smoothed$phase))
+	smooth_out <- rbind(smooth_out, stuff)
+}
+
+
+
+# Plot solid lines for downsampling then dotted line for smoothing
+#png("Wang_colon_downsample_plot.png", width=8, height=4, units="in", res=300)
+pdf("Wang_colon_downsample_plot.pdf", width=8, height=4)
+par(mfrow=c(1,2))
+par(mar=c(4,4,1,1))
+plot(out[,1], out[,2], type="l", lwd=2, col=gt_col["Proliferative"], ylim=c(0,1), xlim=c(1,0), bty="n", xlab="Downsample (%)", ylab="% of Cells")
+lines(out[,1], out[,3], lwd=2, col=gt_col["Quiescent"])
+
+par(mar=c(4,0,1,1))
+plot(smooth_out[,1], smooth_out[,2], type="l", lwd=2, col=gt_col["Proliferative"], ylim=c(0,1), xlim=c(0.5,0), yaxt="n", lty=2, xlab="Smoothing threshold", ylab="", bty="n")
+lines(smooth_out[,1], smooth_out[,3], lwd=2, col=gt_col["Quiescent"], lty=2)
+legend("right", col=c(gt_col["Proliferative"], gt_col["Quiescent"], "black", "black"), lty=c(1,1,1,2), c("Proliferative", "Quiescent", "Original", "knn-smoothed"), bty="n", lwd=2)
+
+dev.off()
+
 
 
 ####################### Defunct ######################

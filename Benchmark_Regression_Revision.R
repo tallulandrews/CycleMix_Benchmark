@@ -677,6 +677,24 @@ obj@graphs$SeurReg <- corrected$seur_nn_graph
 obj@graphs$UnCor <- corrected$orig_nn_graph
 obj@graphs$SeurReg@assay.used <- "RNA"
 
+# cell-type lisi
+require(lisi)
+tmp2 <- compute_lisi(corrected$seur_umap, obj@meta.data, "cell_type")
+tmp3 <- compute_lisi(corrected$orig_umap, obj@meta.data, "cell_type")
+tmp1 <- compute_lisi(corrected$cyclemix_umap, obj@meta.data, "cell_type")
+res <- wilcox.test(tmp1, tmp2)
+
+df <- data.frame(correction=c("None", "CycleMix", "Seurat"), 
+		meanLISI = c(mean(tmp3[,1]), mean(tmp1[,1]), mean(tmp2[,1])), 
+		medianLISI=c(median(tmp3[,1]), median(tmp1[,1]), median(tmp2[,1]))
+p.vals <- c("CycleMix_vs_Seurat"=wilcox.test(tmp1[,1], tmp2[,1])$p.value, 
+	    "CycleMix_vs_None"=wilcox.test(tmp1[,1], tmp3[,1])$p.value,
+	    "Seurat_vs_None"=wilcox.test(tmp2[,1], tmp3[,1])$p.value)
+saveRDS(list(lisi=df, wilcox.pval=p.vals), "Wang_colon_correction_LISI.rds")
+
+
+
+
 require(igraph)
 obj <- FindClusters(obj, graph.name="CycleMix")
 obj@meta.data$clusters_post_cyclemix <- Idents(obj)
